@@ -1,6 +1,7 @@
-# Hamamatsu DCAM-API
+# Physik Instrumente GCS2
 
-Hamamatsu DCAM-API (Digital CAMera Application Programming Interface) provides standardize camera control and functionality of all Hamamatsu digital cameras.
+PI GCS2 (General Command Set) library allows controlling one or more PI controllers connected to a host PC. 
+The PI GCS is the standard command set that ensures compatibility between different PI controllers.
 
 ## Getting Started
 
