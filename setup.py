@@ -4,10 +4,10 @@ from setuptools import Extension, setup
 from Cython.Build import build_ext
 import numpy
 
-NAME = "olive-camera-dcamapi"
+NAME = "olive-motion-pi"
 VERSION = "0.1"
 DESCRIPTION = "A small template project that shows how to wrap C/C++ code into python using Cython"
-URL = "https://github.com/liuyenting/olive-camera-dcamapi"
+URL = "https://github.com/liuyenting/olive-motion-pi"
 
 # Trove classifiers
 #   https://pypi.org/classifiers/
@@ -22,11 +22,11 @@ EMAIL = "ytliu@gate.sinica.edu.tw"
 
 REQUIRES = ["numpy"]
 
-PACKAGES = ["olive.drivers.dcamapi"]
+PACKAGES = ["olive.drivers.pi"]
 
 EXT_DEFS = [
     {
-        "name": "olive.drivers.dcamapi.wrapper",
+        "name": "olive.drivers.pi.wrapper",
         "language": "c++",
         "include_dirs": [
             # "Module .pxd file not found next to .pyx file", https://github.com/cython/cython/issues/2452
@@ -34,7 +34,7 @@ EXT_DEFS = [
             # numpy
             numpy.get_include()
         ],
-        "extra_objects": ["lib/dcamapi.lib"],
+        "extra_objects": ["lib/PI_GCS2_DLL_x64.lib"],
     }
 ]
 
