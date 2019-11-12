@@ -2,13 +2,12 @@
 
 cimport cython
 
-import numpy as np
-cimport numpy as np
-
 from gcs2 cimport *
 
 @cython.final
-cdef class GCS2:
-    """
-    Wrapper class for the API.
-    """
+cdef class GCS2_Wrapper:
+    ##
+    ## communication
+    ##
+    def connect(self):
+        return PI_TryConnectUSB("SERIAL")
