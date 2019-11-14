@@ -16,8 +16,18 @@ logger = logging.getLogger(__name__)
 
 
 class PIController(MotionController):
-    def __init__(self, driver, timeout=1000):
+    def __init__(self, driver, idn, timeout=1000):
         super().__init__(driver, timeout)
+        self._idn, self._ctrl_id = idn, -1
+
+    def test_open(self):
+        pass
+
+    def open(self):
+        pass
+
+    def close(self):
+        pass
 
     ##
 
@@ -37,21 +47,15 @@ class PIController(MotionController):
     def info(self):
         pass
 
-
-class PIUSBController(PIController):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
     ##
 
-    def test_open(self):
-        pass
+    @property
+    def ctrl_id(self):
+        return self._ctrl_id
 
-    def open(self):
-        pass
-
-    def close(self):
-        pass
+    @property
+    def idn(self):
+        return self._idn
 
 
 class GCS2(Driver):
@@ -66,11 +70,18 @@ class GCS2(Driver):
     def shutdown(self):
         pass
 
-    def enumerate_devices(self, keyword: str = ""):
+    def enumerate_devices(self, keyword: str = "") -> PIController:
         response = self.api.enumerate_usb(keyword)
-        dev_idn = list(response.split('\n'))
+        dev_idn = list(response.strip().split("\n"))
 
-        return dev_idn
+        valid_devices = []
+        for idn in dev_idn:
+            try:
+                device = PIController(self, idn)
+            except UnsupportedDeviceError:
+                pass
+
+        return tuple(valid_devices)
 
     ##
 
