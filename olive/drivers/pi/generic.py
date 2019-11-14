@@ -8,7 +8,7 @@ from olive.core import Driver, DeviceInfo
 from olive.devices import MotionController
 from olive.devices.errors import UnsupportedDeviceError
 
-from .wrapper import GCS2 as _GCS2
+from .wrapper import Communication
 
 __all__ = ["GCS2"]
 
@@ -56,7 +56,7 @@ class PIUSBController(PIController):
 
 class GCS2(Driver):
     def __init__(self):
-        self._api = _GCS2()
+        self._api = Communication()
 
     ##
 
@@ -66,11 +66,11 @@ class GCS2(Driver):
     def shutdown(self):
         pass
 
-    def enumerate_devices(self, keyword: str = None):
+    def enumerate_devices(self, keyword: str = ""):
         response = self.api.enumerate_usb(keyword)
         dev_idn = list(response.split('\n'))
 
-        return result
+        return dev_idn
 
     ##
 
