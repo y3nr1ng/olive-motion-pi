@@ -1,4 +1,3 @@
-import ctypes
 import logging
 from multiprocessing.sharedctypes import RawArray
 import re
@@ -9,7 +8,7 @@ from olive.core import Driver, DeviceInfo
 from olive.devices import MotionController
 from olive.devices.errors import UnsupportedDeviceError
 
-from .wrapper import GCS2 as _GCS2 # NOTE: WTF? not found?
+from .wrapper import GCS2 as _GCS2
 
 __all__ = ["GCS2"]
 
@@ -62,14 +61,16 @@ class GCS2(Driver):
     ##
 
     def initialize(self, error_check=True):
-        self.api.set_error_check(error_check)
+        pass
 
     def shutdown(self):
         pass
 
-    def enumerate_devices(self):
-        result = self.api.enumerate_usb()
-        print(result)
+    def enumerate_devices(self, keyword: str = None):
+        response = self.api.enumerate_usb(keyword)
+        dev_idn = list(response.split('\n'))
+
+        return result
 
     ##
 

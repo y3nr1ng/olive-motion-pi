@@ -9,71 +9,57 @@ from gcs2 cimport *
 @cython.final
 cdef class GCS2:
     ##
-    ## communication
+    ## error
     ##
-    ## rs232
-    def try_connect_rs232(self):
-        pass
+    @staticmethod
+    def check_error(int ret):
+        if ret < 0:
+            msg = GCS2.translate_error(ret)
 
-    def connect_rs232(self, port_num, baudrate, name):
-        pass
 
-    def open_rs232_daisy_chain(self):
-        pass
+    @staticmethod
+    cdef get_error(int ctrl_id):
+        return PI_GetError(ctrl_id)
 
-    ## usb
-    cpdef enumerate_usb(self, str keyword, int nbytes=8192):
+    @staticmethod
+    cdef translate_error(int errno, int nbytes=1024):
         cdef char[::1] buffer = view.array(shape=(nbytes, ), itemsize=sizeof(char), format='c')
         cdef char *c_buffer = &buffer[0]
 
-        PI_EnumerateUSB(c_buffer, nbytes, keyword.encode())
+        ret = PI_TranslateError(errno, c_buffer, nbytes)
+        assert ret > 0, f"message buffer ({nbytes} bytes) is too small"
 
-        return buffer.decode('utf-8', errors='replace')
+        return c_buffer.decode('ascii', errors='replace')
 
-    def try_connect_usb(self):
-        pass
+    cpdef set_error_check(self, int ctrl_id, pybool err_check):
+        PI_SetErrorCheck(ctrl_id, err_check)
+
+    ##
+    ## communication
+    ##
+    ### USB ###
+    cpdef enumerate_usb(self, str keyword=None, int nbytes=1024):
+        cdef char[::1] buffer = view.array(shape=(nbytes, ), itemsize=sizeof(char), format='c')
+        cdef char *c_buffer = &buffer[0]
+
+        b_keyword = keyword.encode('ascii')
+        cdef char *c_keyword = b_keyword
+
+        ret = PI_EnumerateUSB(c_buffer, nbytes, c_keyword)
+
+        return c_buffer.decode('ascii', errors='replace')
+
+    def try_connect_usb(self, str desc):
+        b_desc = desc.encode('ascii')
+        cdef char *c_desc = b_desc
+
+        ret = PI_TryConnectUSB(c_desc)
+
+        return ret
 
     def connect_usb(self, desc, baudrate=None):
         pass
 
-    def open_usb_daisy_chain(self):
-        pass
-
-    ## daisy chain
-    def connect_daisy_chain_device(self, port_id, device_num):
-        pass
-
-    def close_daisy_chain(self, port_id):
-        pass
-
-    ## probe
-    def is_connected(self, ctrl_id):
-        pass
-
-    def is_connecting(self, ctrl_id):
-        pass
-
-    ## termination
-    def cancel_connect(self, thread_id):
-        pass
-
+    ### termination ###
     def close_connection(self, ctrl_id):
         pass
-
-
-    ## probe
-    cpdef set_error_check(self, int ctrl_id, pybool err_check):
-        PI_SetErrorCheck(ctrl_id, err_check)
-
-    def get_controller_id(self, thread_id):
-        pass
-
-    def get_error(self, ctrl_id):
-        pass
-
-    def translate_error(self, err):
-        pass
-
-
-
-

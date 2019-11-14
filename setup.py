@@ -1,5 +1,6 @@
 import os
 from setuptools import Extension, setup
+import sys
 
 from Cython.Build import build_ext
 import numpy
@@ -32,9 +33,11 @@ EXT_DEFS = [
             # "Module .pxd file not found next to .pyx file", https://github.com/cython/cython/issues/2452
             ".",
             # numpy
-            numpy.get_include()
+            numpy.get_include(),
         ],
-        "extra_objects": ["lib/PI_GCS2_DLL_x64.lib"],
+        # "extra_objects": ["lib/PI_GCS2_DLL_x64.lib"],
+        "libraries": ["PI_GCS2_DLL_x64"],
+        "library_dirs": ["lib"],
     }
 ]
 
@@ -59,6 +62,21 @@ def generate_extension(ext_def):
 
     ext_def["sources"] = [ext_path]
 
+    if "extra_objects" in ext_def:
+        if not sys.platform.startswith("linux"):
+            # NOTE:
+            #   re-route static library on Windows https://stackoverflow.com/a/49139257
+            # extract names
+            static_libs = [os.path.split(lib) for lib in ext_def["extra_objects"]]
+            lib_dirs, lib_names = zip(*static_libs)
+            lib_names = [os.path.splitext(name)[0] for name in lib_names]
+            # 1) save it into 'libraries'
+            # 2) append search path (remove duplicates on-the-fly)
+            ext_def.setdefault("libraries", []).extend(lib_names)
+            ext_def.setdefault("library_dirs", []).extend(list(set(lib_dirs)))
+            # empty 'extra_objects'
+            del ext_def["extra_objects"]
+
     # prepend root directory
     arguments = (
         "include_dirs",
@@ -74,10 +92,13 @@ def generate_extension(ext_def):
         except KeyError:
             # ignore unused argument
             pass
+    from pprint import pprint
 
+    pprint(ext_def)
     return Extension(**ext_def)
 
 
+print("prepare to create extensions")
 EXTENSIONS = [generate_extension(ext_def) for ext_def in EXT_DEFS]
 
 setup(
