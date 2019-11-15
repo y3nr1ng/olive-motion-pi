@@ -21,5 +21,12 @@ driver.initialize()
 try:
     devices = driver.enumerate_devices()
     pprint(devices)
+
+    controller = devices[0]
+    controller.open()
+    try:
+        pprint(controller.get_property("help"))
+    finally:
+        controller.close()
 finally:
     driver.shutdown()

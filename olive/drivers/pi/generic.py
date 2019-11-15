@@ -23,18 +23,9 @@ class PIController(MotionController):
     ##
 
     def test_open(self):
-        api, ctrl_id = self.driver.api, -1
+        api = self.driver.api
         try:
-            thread_id = api.try_connect_usb(self.idn)
-
-            import time
-            while api.is_connecting(thread_id):
-                logger.debug('.. connecting')
-                time.sleep(0.1)
-            logger.debug('connected!')
-
-            ctrl_id = api.get_controller_id(thread_id)
-            logger.debug(f'thread {thread_id} -> ctrl {ctrl_id}')
+            ctrl_id = api.connect_usb(self.idn)
             self._handle = Command(ctrl_id)
             logger.info(f"..{self.info}")
         except RuntimeError as err:
@@ -42,18 +33,22 @@ class PIController(MotionController):
             raise UnsupportedDeviceError
         finally:
             api.close_connection(ctrl_id)
-            self._handle = None
 
     def open(self):
-        pass
+        ctrl_id = self.driver.api.connect_usb(self.idn)
+        self._handle = Command(ctrl_id)
+
+        self.handle.set_error_check(True)
 
     def close(self):
-        pass
+        ctrl_id = self.handle.ctrl_id
+        self.driver.api.close_connection(ctrl_id)
+        self._handle = None
 
     ##
 
     def enumerate_properties(self):
-        pass
+        return ("help", "versions")
 
     ##
 
@@ -76,18 +71,67 @@ class PIController(MotionController):
 
     @property
     def info(self):
-        print('===')
-        print(self.handle.get_help())
-        print()
+        # extract info from *IDN?, since SSN? may not exist
+        vendor, model, *args = self.idn.split(" ")
+        sn = args[-1]
 
-        params = {
-            "version": 'N/A',
-            "vendor": 'PI',
-            "model": 'N/A',
-            "serial_number": 'N/A',
-        }
+        # extract version
+        versions = self._get_versions()
+        # .. find GCS2 DLL
+        version = None
+        for key, value in versions.items():
+            if "PI_GCS2" in key:
+                version = value
+                break
+        else:
+            logger.warning("unable to determine GCS2 version")
+            version = "UNKNOWN"
 
-        return DeviceInfo(**params)
+        return DeviceInfo(vendor=vendor, model=model, version=version, serial_number=sn)
+
+    ##
+
+    def _get_help(self, max_bytes=2 ** 20):
+        response = PIController._retrieve_large_response(self.handle.get_help)
+
+        result = dict()
+        for line in response.split('\n'):
+            key, value = tuple(line.split(' ', maxsplit=1))
+            result[key.strip()] = value.strip()
+
+        # TODO isolate syntax / help string
+
+        return result
+
+    def _get_versions(self):
+        response = PIController._retrieve_large_response(self.handle.get_version)
+
+        # split version strings
+        result = dict()
+        for line in response.split("\n"):
+            key, value = tuple(line.split(":", maxsplit=1))
+            result[key.strip()] = value.strip()
+
+        return result
+
+    ##
+
+    @staticmethod
+    def _retrieve_large_response(func, start_size=128, max_size=2 ** 20, strip=True):
+        response, nbytes = None, start_size
+        while nbytes < max_size:
+            try:
+                response = func(nbytes)
+                if strip:
+                    response = response.strip()
+                break
+            except RuntimeError as err:
+                if "overflow" in str(err):
+                    nbytes *= 2
+                    logger.warning(f"overflow, increase buffer to {nbytes} bytes")
+                else:
+                    raise
+        return response
 
 
 class GCS2(Driver):

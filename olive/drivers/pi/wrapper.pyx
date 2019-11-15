@@ -79,6 +79,10 @@ cdef class Communication:
         Communication.check_error(ret)
         return ret
 
+    cpdef is_connected(self, int ctrl_id):
+        ret = PI_IsConnected(ctrl_id)
+        return <pybool>(ret > 0)
+
     ### termination ###
     cpdef close_connection(self, int ctrl_id):
         PI_CloseConnection(ctrl_id)
@@ -99,13 +103,12 @@ cdef class Command:
             # true, successful
             return
         err_id = PI_GetError(self.ctrl_id)
-        print(f'ctrl_id: {self.ctrl_id}, err_id: {err_id}')
         raise RuntimeError(translate_error(err_id))
 
     ##
 
-    cpdef set_error_check(self, int ctrl_id, pybool err_check):
-        PI_SetErrorCheck(ctrl_id, err_check)
+    cpdef set_error_check(self, pybool err_check):
+        PI_SetErrorCheck(self.ctrl_id, err_check)
 
     ##
 
@@ -121,23 +124,7 @@ cdef class Command:
 
         return c_buffer.decode('ascii', errors='replace')
 
-    cpdef get_serial_number(self, int nbytes=64):
-        """qSSN"""
-        cdef char[::1] buffer = view.array(
-            shape=(nbytes, ), itemsize=sizeof(char), format='c'
-        )
-        cdef char *c_buffer = &buffer[0]
-
-        ret = PI_qSSN(self.ctrl_id, c_buffer, nbytes)
-        self.check_error(ret)
-
-        for b in buffer:
-            print(b, end=' ')
-        print()
-
-        return c_buffer.decode('ascii', errors='replace')
-
-    cpdef get_version(self, int nbytes=16384):
+    cpdef get_version(self, int nbytes=1024):
         """qVER"""
         cdef char[::1] buffer = view.array(
             shape=(nbytes, ), itemsize=sizeof(char), format='c'
@@ -146,7 +133,5 @@ cdef class Command:
 
         ret = PI_qVER(self.ctrl_id, c_buffer, nbytes)
         self.check_error(ret)
-
-        print(buffer)
 
         return c_buffer.decode('ascii', errors='replace')
