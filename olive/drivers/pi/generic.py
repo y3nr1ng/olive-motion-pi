@@ -49,6 +49,12 @@ class PILinear(PIAxis, LinearAxis):
 
     ##
 
+    def enumerate_properties(self):
+        # TODO use reponse from qSPA
+        pass
+
+    ##
+
     @property
     def handle(self):
         return self._handle
@@ -107,13 +113,23 @@ class PIController(MotionController):
         response = PIController._retrieve_large_response(self.handle.get_parameters)
 
         # response format
-        #   '0x1=\t0\t1\tINT\tmotorcontroller\tP term'
-        pid = tuple(
-            int(line.split("=")[0], 0)  # convert parameter ID to int
-            for line in response.split("\n")
-            if line.startswith("0x")  # only deal with hex string description
-        )
-        return pid
+        #   <PamID>=
+        #       <CmdLevel>\t
+        #       <MaxItem>\t
+        #       <DataType>\t
+        #       <FuncDesc>\t
+        #       <Desc>
+        #       [{\t<Value>=<Desc>}]
+        pids = []
+        for line in response.split("\n"):
+            if not line.startswith("0x"):
+                continue
+            pid, desc = line.split("=", maxsplit=1)
+            pid, desc = int(pid, 16), desc.strip()
+
+            cmd_level, max_item, dtype, _, desc, *options = desc.split("\t")
+            pids.append((pid, desc))
+        return tuple(pids)
 
     def _get_versions(self):
         response = PIController._retrieve_large_response(self.handle.get_version)
