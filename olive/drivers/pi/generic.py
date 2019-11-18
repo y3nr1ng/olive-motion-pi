@@ -147,7 +147,7 @@ class PIController(MotionController):
     def enumerate_axes(self):
         axes = []
         for axis_id in self.handle.get_axes_id().split("\n"):
-            PILinear()
+            print(axis_id)
 
     ##
 

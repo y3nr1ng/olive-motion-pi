@@ -22,15 +22,12 @@ try:
     controller = devices[0]
     controller.open()
     try:
-        print(">>> HELP")
-        pprint(controller.get_property("help"))
-        print("<<< HELP")
-        print()
-
         print(">>> PARAMETERS")
         pprint(controller.get_property("parameters"))
         print("<<< PARAMETERS")
         print()
+
+        print(controller.enumerate_axes())
     finally:
         controller.close()
 finally:
