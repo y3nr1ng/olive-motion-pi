@@ -119,7 +119,7 @@ cdef class Communication:
             daisy_id (int): ID of the daisy chain port
             index (int): index of the daisy chain device to use, [1, N]
         """
-        ret = PI_ConnectDaisyChainDevice(daisy_id, dev_num)
+        ret = PI_ConnectDaisyChainDevice(daisy_id, index)
         Communication.check_error(ret)
         return ret
 
@@ -239,6 +239,18 @@ cdef class Command:
         cdef char *c_buffer = &buffer[0]
 
         ret = PI_qHLP(self.ctrl_id, c_buffer, nbytes)
+        self.check_error(ret)
+
+        return c_buffer.decode('ascii', errors='replace')
+
+    cpdef get_identification_string(self, int nbytes=256):
+        """qIDN"""
+        cdef char[::1] buffer = view.array(
+            shape=(nbytes, ), itemsize=sizeof(char), format='c'
+        )
+        cdef char *c_buffer = &buffer[0]
+
+        ret = PI_qIDN(self.ctrl_id, c_buffer, nbytes)
         self.check_error(ret)
 
         return c_buffer.decode('ascii', errors='replace')

@@ -161,6 +161,8 @@ class PIController(MotionController):
 
     @property
     def idn(self):
+        if self._idn is None:
+            self._idn = self.handle.get_identification_string()
         return self._idn
 
     @property
@@ -211,48 +213,6 @@ class PIController(MotionController):
         return self.handle.get_valid_character_set()
 
 
-class PIDaisyController(PIController):
-    def __init__(self, driver, daisy_index, parent=None, timeout=1000):
-        super().__init__(driver, idn, timeout=1000)
-        self._daisy_index = daisy_index
-
-        super().__init__(driver, timeout)
-        self._idn, self._handle = idn, None
-
-    ##
-
-    def test_open(self):
-        api = self.driver.api
-        try:
-            ctrl_id = api.connect_usb(self.idn)
-            self._handle = Command(ctrl_id)
-            logger.info(f"..{self.info}")
-        except RuntimeError as err:
-            logger.exception(err)
-            raise UnsupportedDeviceError
-        finally:
-            api.close_connection(ctrl_id)
-
-    def open(self):
-        ctrl_id = self.driver.api.connect_daisy_chain_device(
-            self.parrent.daisy_index, self.daisy_index
-        )
-        self._handle = Command(ctrl_id)
-
-        self.handle.set_error_check(True)
-
-    def close(self):
-        ctrl_id = self.handle.ctrl_id
-        self.driver.api.close_connection(ctrl_id)
-        self._handle = None
-
-    ##
-
-    @property
-    def daisy_index(self):
-        return self._daisy_index
-
-
 class GCS2(Driver):
     def __init__(self):
         self._api = Communication()
@@ -285,7 +245,7 @@ class GCS2(Driver):
                     if n_dev == 1:
                         raise StopIteration
                     # expand the result
-                    logger.debug(f"found {n_dev} slave(s)")
+                    logger.debug(f"found {n_dev} devices on the daisy chain")
                 except RuntimeError:
                     # unknown runtime error
                     pass
