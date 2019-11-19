@@ -83,6 +83,49 @@ cdef class Communication:
         ret = PI_IsConnected(ctrl_id)
         return ret > 0
 
+    ### daisy chain ###
+
+    cpdef open_usb_daisy_chain(self, str desc, int nbytes=1024):
+        """
+        Open a USB interface to a daisy chain.
+
+        Note that calling this function does not open a daisy chain device, to get access to one, one must call `connect_daisy_chain_device` later on.
+
+        Args:
+            desc (str): description of the controller
+            nbytes (int, optional): size of the buffer to receive IDN
+        """
+        cdef char[::1] buffer = view.array(
+            shape=(nbytes, ), itemsize=sizeof(char), format='c'
+        )
+        cdef char *c_buffer = &buffer[0]
+
+        b_desc = desc.encode('ascii')
+        cdef char *c_desc = b_desc
+
+        cdef int n_dev
+        ret = PI_OpenUSBDaisyChain(c_desc, &n_dev, c_buffer, nbytes)
+        Communication.check_error(ret)
+
+        return ret, n_dev, c_buffer.decode('ascii', errors='replace')
+
+    cpdef connect_daisy_chain_device(self, int daisy_id, int index):
+        """
+        Open a daisy chain device.
+
+        Before connecting a daisy cahin device, the daisy chain port has to be opened using `open_usb_daisy_chain`.
+
+        Args:
+            daisy_id (int): ID of the daisy chain port
+            index (int): index of the daisy chain device to use, [1, N]
+        """
+        ret = PI_ConnectDaisyChainDevice(daisy_id, dev_num)
+        Communication.check_error(ret)
+        return ret
+
+    cpdef close_daisy_chain(self, daisy_id):
+        PI_CloseDaisyChain(daisy_id)
+
     ### termination ###
     cpdef close_connection(self, int ctrl_id):
         PI_CloseConnection(ctrl_id)
