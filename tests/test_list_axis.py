@@ -19,16 +19,16 @@ try:
     devices = driver.enumerate_devices()
     pprint(devices)
 
-    controller = devices[0]
-    controller.open()
-    try:
-        print(">>> PARAMETERS")
-        pprint(controller.get_property("parameters"))
-        print("<<< PARAMETERS")
-        print()
+    for controller in devices:
+        controller.open()
+        try:
+            print(">>> PARAMETERS")
+            pprint(controller.get_property("parameters"))
+            print("<<< PARAMETERS")
+            print()
 
-        print(controller.enumerate_axes())
-    finally:
-        controller.close()
+            print(controller.enumerate_axes())
+        finally:
+            controller.close()
 finally:
     driver.shutdown()
