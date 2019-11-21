@@ -3,6 +3,7 @@
 from cpython cimport bool as pybool
 cimport cython
 from cython cimport view
+from libcpp.vector cimport vector
 
 from gcs2 cimport *
 
@@ -215,6 +216,41 @@ cdef class Command:
         self.check_error(ret)
 
         return c_buffer.decode('ascii', errors='replace')
+
+    cpdef get_axes_parameter(self, str axis_id, parameter, int nbytes=512):
+        """qSPA"""
+        b_axis_id = axis_id.encode('ascii')
+        cdef char *c_axis_id = b_axis_id
+
+        cdef vector[unsigned int] v_parameter = parameter
+
+        cdef double[::1] value = view.array(
+            shape=(nbytes, ), itemsize=sizeof(double), format='g'
+        )
+        cdef double *c_value = &value[0]
+
+        cdef char[::1] strings = view.array(
+            shape=(nbytes, ), itemsize=sizeof(char), format='c'
+        )
+        cdef char *c_strings = &strings[0]
+
+        ret = PI_qSPA(
+            self.ctrl_id,
+            c_axis_id,
+            v_parameter.data(),
+            c_value,
+            c_strings,
+            nbytes
+        )
+        self.check_error(ret)
+
+        print(v_parameter[0])
+        print(c_value[0])
+
+        return value, c_strings.decode('ascii', errors='replace')
+
+    cpdef set_axes_parameter(self):
+        pass
 
     ## motions ##
     cpdef go_to_home(self, str axes=""):

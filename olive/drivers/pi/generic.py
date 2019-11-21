@@ -8,6 +8,7 @@ import numpy as np
 from olive.core import Device, DeviceInfo, Driver
 from olive.devices import LinearAxis, MotionController
 from olive.devices.errors import UnsupportedDeviceError
+from olive.devices.motion import Axis
 
 from .wrapper import Command, Communication
 
@@ -16,9 +17,26 @@ __all__ = ["GCS2"]
 logger = logging.getLogger(__name__)
 
 
-class PIAxis(object):
-    def __init__(self, axis_id):
+class PIAxis(Axis):
+    def __init__(self, axis_id, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._axis_id = axis_id
+
+    ##
+
+    def enumerate_properties(self):
+        return ("is_rotary_stage", "stage_type")
+
+    def _get_is_rotary_stage(self):
+        value, _ = self.handle.get_axes_parameter(self.axis_id, [19])
+        value = value[0]
+        print(f"_get_is_rotary_stage: {value}")
+        return value > 0
+
+    def _get_stage_type(self):
+        _, value = self.handle.get_axes_parameter(self.axis_id, [60])
+        print(f"_get_stage_type: {value}")
+        return value
 
     ##
 
@@ -43,14 +61,16 @@ class PIAxis(object):
 
 class PILinear(PIAxis, LinearAxis):
     def __init__(self, parent, axis_id):
-        LinearAxis.__init__(self, parent.driver, parent=parent)
-        PIAxis.__init__(self, axis_id)
+        super().__init__(axis_id=axis_id, driver=parent.driver, parent=parent)
         self._handle, self._axis_id = parent.handle, axis_id
 
-    ##
+    def test_open(self):
+        pass
 
-    def enumerate_properties(self):
-        # TODO use reponse from qSPA
+    def open(self):
+        pass
+
+    def close(self):
         pass
 
     ##
@@ -68,14 +88,18 @@ class PIController(MotionController):
     ##
 
     def test_open(self):
+        api = self.driver.api
+        ctrl_id = -1
         try:
-            self.open()
+            ctrl_id = api.connect_usb(self.idn)
+            self._handle = Command(ctrl_id)
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
             raise UnsupportedDeviceError
         finally:
-            self.close()
+            api.close_connection(ctrl_id)
+            self._handle = None
 
     def open(self):
         ctrl_id = self.driver.api.connect_usb(self.idn)
@@ -123,7 +147,7 @@ class PIController(MotionController):
             pid, desc = int(pid, 16), desc.strip()
 
             cmd_level, max_item, dtype, _, desc, *options = desc.split("\t")
-            pids.append((pid, desc))
+            pids.append((pid, max_item, dtype, desc))
         return tuple(pids)
 
     def _get_versions(self):
@@ -141,8 +165,19 @@ class PIController(MotionController):
 
     def enumerate_axes(self):
         axes = []
-        for axis_id in self.handle.get_axes_id().split("\n"):
-            print(axis_id)
+        for axis_id in self.handle.get_axes_id().strip().split("\n"):
+            logger.info(f"axis id: {axis_id}")
+
+            # query and re-asscoiate stage parameter from database
+            stype = self.handle.get_stage_type(axis_id)
+            print(stype)
+
+            axes = PILinear(self, axis_id)
+            stype = axes.get_property("stage_type")
+            print(f"stage_type: {stype}")
+            state = axes.get_property("is_rotary_stage")
+            print(f"is rotary: {state}")
+            print()
 
     ##
 
@@ -228,6 +263,7 @@ class PIDaisyChain(Device):
 
     def test_open(self):
         api = self.driver.api
+        daisy_id = -1
         try:
             daisy_id, n_dev, _ = api.open_usb_daisy_chain(self.idn)
             if n_dev == 1:

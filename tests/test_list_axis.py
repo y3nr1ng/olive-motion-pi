@@ -23,7 +23,7 @@ try:
         controller.open()
         try:
             print(">>> PARAMETERS")
-            pprint(controller.get_property("parameters"))
+            pprint(controller.get_property("help"))
             print("<<< PARAMETERS")
             print()
 
