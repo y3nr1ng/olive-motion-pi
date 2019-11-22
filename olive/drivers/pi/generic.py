@@ -17,6 +17,7 @@ from .wrapper import (
     ReferenceMode,
     ReferenceStrategy,
     ServoState,
+    VelocityControl,
 )
 
 __all__ = ["GCS2"]
@@ -39,7 +40,8 @@ class PIAxis(Axis):
             logger.debug(f".. is referenced")
         else:
             # TODO lock to center for now
-            self.handle.start_reference(self.axis_id, ReferenceStrategy.ReferencePoint)
+            #self.handle.start_reference(self.axis_id, ReferenceStrategy.ReferencePoint)
+            self.handle.start_reference(self.axis_id, ReferenceStrategy.NegativeLimit)
 
     ##
 
@@ -73,19 +75,27 @@ class PIAxis(Axis):
     def get_position(self):
         return self.handle.get_current_position(self.axis_id)
 
-    def set_absolute_position(self, position):
-        self.handle.set_target_position(self.axis_id, position)
+    def set_absolute_position(self, pos):
+        self.handle.set_target_position(self.axis_id, pos)
 
-    def set_relative_position(self, position):
-        self.handle.set_relative_target_position(self.axis_id, position)
+    def set_relative_position(self, pos):
+        self.handle.set_relative_target_position(self.axis_id, pos)
 
     ##
 
     def get_velocity(self):
-        pass
+        return self.handle.get_velocity()
 
-    def set_velocity(self, velocity):
-        pass
+    def set_velocity(self, vel):
+        self.handle.set_velocity(self.axis_id, vel)
+
+    ##
+
+    def get_acceleration(self):
+        return self.handle.get_acceleration()
+
+    def set_acceleration(self, acc):
+        self.handle.set_acceleration(self.axis_id, acc)
 
     ##
 
@@ -109,7 +119,7 @@ class PIAxis(Axis):
     def wait(self):
         # TODO use async
         while self.handle.is_moving(self.axis_id):
-            print('.. busy')
+            print(".. busy")
 
     ##
 
@@ -146,6 +156,8 @@ class PILinear(PIAxis, LinearAxis):
     def __init__(self, parent, axis_id):
         super().__init__(parent=parent, axis_id=axis_id)
 
+    ##
+
     def test_open(self):
         self.open()
         try:
@@ -165,6 +177,8 @@ class PIRotary(PIAxis, RotaryAxis):
     def __init__(self, parent, axis_id):
         super().__init__(axis_id=axis_id, parent=parent)
 
+    ##
+
     def test_open(self):
         self.open()
         try:
@@ -176,6 +190,13 @@ class PIRotary(PIAxis, RotaryAxis):
             raise UnsupportedDeviceError
         finally:
             self.close()
+
+    ##
+
+    def continuous_mode(self, enable):
+        self.handle.set_velocity_control_mode(
+            self.axis_id, VelocityControl.On if enable else VelocityControl.Off
+        )
 
 
 class PIController(MotionController):

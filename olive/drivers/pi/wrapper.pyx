@@ -24,6 +24,10 @@ class ServoState(IntEnum):
     OpenLoop    = 0
     ClosedLoop  = 1
 
+class VelocityControl(IntEnum):
+    On  = 1
+    Off = 0
+
 ##
 
 cdef translate_error(int err_id, int nbytes=1024):
@@ -291,12 +295,6 @@ cdef class Command:
         ret = PI_SVO(self.ctrl_id, c_axis_id, &state)
         self.check_error(ret)
 
-    cpdef get_velocity(self):
-        pass
-
-    cpdef set_velocity(self, str axis_id, double value):
-        pass
-
     ## reference ##
     cpdef get_reference_mode(self, str axis_id):
         """qRON"""
@@ -398,6 +396,63 @@ cdef class Command:
         cdef char *c_axis_id = b_axis_id
 
         ret = PI_MVR(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+    cpdef get_velocity_control_mode(self, str axis_id):
+        """qVCO"""
+        b_axis_id = axis_id.encode('ascii')
+        cdef char *c_axis_id = b_axis_id
+
+        cdef int mode
+        ret = PI_qVCO(self.ctrl_id, c_axis_id, &mode)
+        self.check_error(ret)
+
+        return VelocityControl(mode)
+
+    cpdef set_velocity_control_mode(self, str axis_id, int mode: VelocityControl):
+        """VCO"""
+        b_axis_id = axis_id.encode('ascii')
+        cdef char *c_axis_id = b_axis_id
+
+        ret = PI_VCO(self.ctrl_id, c_axis_id, &mode)
+        self.check_error(ret)
+
+    cpdef get_velocity(self, str axis_id):
+        """qVEL"""
+        b_axis_id = axis_id.encode('ascii')
+        cdef char *c_axis_id = b_axis_id
+
+        cdef double value
+        ret = PI_qVEL(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+        return value
+
+    cpdef set_velocity(self, str axis_id, double vel):
+        """VEL"""
+        b_axis_id = axis_id.encode('ascii')
+        cdef char *c_axis_id = b_axis_id
+
+        ret = PI_VEL(self.ctrl_id, c_axis_id, &vel)
+        self.check_error(ret)
+
+    cpdef get_acceleration(self, str axis_id):
+        """qACC"""
+        b_axis_id = axis_id.encode('ascii')
+        cdef char *c_axis_id = b_axis_id
+
+        cdef double value
+        ret = PI_qACC(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+        return value
+
+    cpdef set_acceleration(self, str axis_id, double acc):
+        """ACC"""
+        b_axis_id = axis_id.encode('ascii')
+        cdef char *c_axis_id = b_axis_id
+
+        ret = PI_ACC(self.ctrl_id, c_axis_id, &acc)
         self.check_error(ret)
 
     ## utils ##

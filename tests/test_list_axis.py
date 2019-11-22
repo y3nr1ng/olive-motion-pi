@@ -22,7 +22,8 @@ try:
         print("> home")
         axes.home()
         print("> set_relative_position")
-        axes.set_relative_position(1080)
-        axes.wait()
+        while True:
+            axes.set_relative_position(1)
+            axes.wait()
 finally:
     driver.shutdown()
