@@ -17,6 +17,12 @@ driver.initialize()
 
 try:
     axis = driver.enumerate_devices()
-    pprint(axis)
+    for axes in axis:
+        print(axes.info)
+        print("> home")
+        axes.home()
+        print("> set_relative_position")
+        axes.set_relative_position(1080)
+        axes.wait()
 finally:
     driver.shutdown()

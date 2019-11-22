@@ -11,7 +11,13 @@ from olive.devices import LinearAxis, MotionController, RotaryAxis
 from olive.devices.errors import UnsupportedDeviceError
 from olive.devices.motion import Axis
 
-from .wrapper import Command, Communication
+from .wrapper import (
+    Command,
+    Communication,
+    ReferenceMode,
+    ReferenceStrategy,
+    ServoState,
+)
 
 __all__ = ["GCS2"]
 
@@ -23,10 +29,22 @@ class PIAxis(Axis):
         super().__init__(parent.driver, *args, parent=parent, **kwargs)
         self._handle, self._axis_id = parent.handle, axis_id
 
+    def _open(self):
+        # must use closed-loop
+        self.handle.set_servo_state(self.axis_id, ServoState.ClosedLoop)
+
+        # referenced mode
+        self.handle.set_reference_mode(self.axis_id, ReferenceMode.On)
+        if self.handle.is_referenced(self.axis_id):
+            logger.debug(f".. is referenced")
+        else:
+            # TODO lock to center for now
+            self.handle.start_reference(self.axis_id, ReferenceStrategy.ReferencePoint)
+
     ##
 
     def enumerate_properties(self):
-        return list(self.parent.get_property("available_parameters").keys())
+        return tuple(self.parent.get_property("available_parameters").keys())
 
     def get_property(self, name):
         pid, dtype, max_item = self.parent.get_property("available_parameters")[name]
@@ -49,9 +67,59 @@ class PIAxis(Axis):
 
     ##
 
+    def home(self):
+        self.handle.go_to_home(self.axis_id)
+
+    def get_position(self):
+        return self.handle.get_current_position(self.axis_id)
+
+    def set_absolute_position(self, position):
+        self.handle.set_target_position(self.axis_id, position)
+
+    def set_relative_position(self, position):
+        self.handle.set_relative_target_position(self.axis_id, position)
+
+    ##
+
+    def get_velocity(self):
+        pass
+
+    def set_velocity(self, velocity):
+        pass
+
+    ##
+
+    def set_origin(self):
+        """Define current position as the origin."""
+
+    def get_limits(self):
+        pass
+
+    def set_limits(self):
+        pass
+
+    ##
+
+    def stop(self, emergency=False):
+        if emergency:
+            self.handle.stop_all()
+        else:
+            self.handle.halt(self.axis_id)
+
+    def wait(self):
+        # TODO use async
+        while self.handle.is_moving(self.axis_id):
+            print('.. busy')
+
+    ##
+
     @property
     def axis_id(self):
         return self._axis_id
+
+    @property
+    def busy(self):
+        return self.parent.busy or self.handle.is_moving(self.axis_id)
 
     @property
     def handle(self):
@@ -316,13 +384,11 @@ class PIDaisyChain(Device):
             api.close_daisy_chain(daisy_id)
 
     def _open(self):
-        print(">>> OPEN DAISY")
         self._daisy_id, self._n_members, _ = self.driver.api.open_usb_daisy_chain(
             self.desc_str
         )
 
     def _close(self):
-        print("<<< CLOSE DAISY")
         self.driver.api.close_daisy_chain(self.daisy_id)
         self._daisy_id = -1
 
@@ -412,7 +478,6 @@ class GCS2(Driver):
 
         valid_controllers = []
         for desc_str in desc_strs:
-            logger.debug(f"desc_str: {desc_str}")
             chain = PIDaisyChain(self, desc_str)
             try:
                 chain.test_open()
