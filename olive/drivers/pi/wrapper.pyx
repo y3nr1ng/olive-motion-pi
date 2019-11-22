@@ -85,6 +85,9 @@ cdef class Communication:
         return ret > 0
 
     ### daisy chain ###
+    cpdef set_daisy_chain_scan_max_device_id(self, int max_id):
+        ret = PI_SetDaisyChainScanMaxDeviceID(max_id)
+        Communication.check_error(ret)
 
     cpdef open_usb_daisy_chain(self, str desc, int nbytes=1024):
         """
@@ -217,8 +220,10 @@ cdef class Command:
 
         return c_buffer.decode('ascii', errors='replace')
 
-    cpdef get_axes_parameter(self, str axis_id, parameter, int nbytes=512):
-        """qSPA"""
+    cpdef get_axes_parameter(
+        self, str axis_id, parameter, pybool volatile=False, int nbytes=512
+    ):
+        """qSEP/qSPA"""
         b_axis_id = axis_id.encode('ascii')
         cdef char *c_axis_id = b_axis_id
 
@@ -234,14 +239,24 @@ cdef class Command:
         )
         cdef char *c_strings = &strings[0]
 
-        ret = PI_qSPA(
-            self.ctrl_id,
-            c_axis_id,
-            v_parameter.data(),
-            c_value,
-            c_strings,
-            nbytes
-        )
+        if volatile:
+            ret = PI_qSPA(
+                self.ctrl_id,
+                c_axis_id,
+                v_parameter.data(),
+                c_value,
+                c_strings,
+                nbytes
+            )
+        else:
+            ret = PI_qSEP(
+                self.ctrl_id,
+                c_axis_id,
+                v_parameter.data(),
+                c_value,
+                c_strings,
+                nbytes
+            )
         self.check_error(ret)
 
         return value, c_strings.decode('ascii', errors='replace')

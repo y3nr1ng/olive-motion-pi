@@ -2,7 +2,7 @@ from functools import lru_cache
 import logging
 from multiprocessing.sharedctypes import RawArray
 import re
-import sys
+from typing import Union
 
 import numpy as np
 
@@ -30,14 +30,19 @@ class PIAxis(Axis):
 
     def get_property(self, name):
         pid, dtype, max_item = self.parent.get_property("available_parameters")[name]
-        value_int, value_str = self.handle.get_axes_parameter(self.axis_id, [pid])
+        value_num, value_str = self.handle.get_axes_parameter(self.axis_id, [pid])
         if dtype == "char":
             return value_str
         else:
-            if max_item > 1:
-                return value_int[:max_item]
-            else:
-                return value_int[0]
+            # extract limited portion to prevent memory access violation
+            value_num = value_num[:max_item]
+
+            # convert integers if require
+            if dtype == "int":
+                value_num = [int(v) for v in value_num]
+
+            # simplify
+            return value_num[0] if max_item == 1 else value_num
 
     def set_property(self, name, value):
         raise NotImplementedError
@@ -55,14 +60,16 @@ class PIAxis(Axis):
     @property
     @lru_cache(maxsize=1)
     def info(self):
+        model = self.handle.get_stage_type(self.axis_id).strip()
+        model = model.split("=")[1]
+
         # extract info from parent
         parent_info = self.parent.info
-
         parms = {
             "vendor": parent_info.vendor,
-            "model": self.handle.get_stage_type(self.axis_id),
+            "model": model,
             "version": parent_info.version,
-            "serial_number": parent_info.sn,
+            "serial_number": parent_info.serial_number,
         }
         return DeviceInfo(**parms)
 
@@ -71,16 +78,17 @@ class PILinear(PIAxis, LinearAxis):
     def __init__(self, parent, axis_id):
         super().__init__(parent=parent, axis_id=axis_id)
 
-    ##
-
     def test_open(self):
-        pass
-
-    def open(self):
-        pass
-
-    def close(self):
-        pass
+        self.open()
+        try:
+            if self.get_property("is_rotary_stage") > 0:
+                raise UnsupportedDeviceError
+            logger.info(f".. {self.info}")
+        except RuntimeError as err:
+            logger.exception(err)
+            raise UnsupportedDeviceError
+        finally:
+            self.close()
 
     ##
 
@@ -89,11 +97,23 @@ class PIRotary(PIAxis, RotaryAxis):
     def __init__(self, parent, axis_id):
         super().__init__(axis_id=axis_id, parent=parent)
 
+    def test_open(self):
+        self.open()
+        try:
+            if self.get_property("is_rotary_stage") == 0:
+                raise UnsupportedDeviceError
+            logger.info(f".. {self.info}")
+        except RuntimeError as err:
+            logger.exception(err)
+            raise UnsupportedDeviceError
+        finally:
+            self.close()
+
 
 class PIController(MotionController):
-    def __init__(self, driver, idn, *args, **kwargs):
+    def __init__(self, driver, desc_str, *args, **kwargs):
         super().__init__(driver, *args, **kwargs)
-        self._idn, self._handle = idn, None
+        self._desc_str, self._handle = desc_str, None
 
     ##
 
@@ -101,7 +121,7 @@ class PIController(MotionController):
         api = self.driver.api
         ctrl_id = -1
         try:
-            ctrl_id = api.connect_usb(self.idn)
+            ctrl_id = api.connect_usb(self.desc_str)
             self._handle = Command(ctrl_id)
             logger.info(f".. {self.info}")
         except RuntimeError as err:
@@ -111,11 +131,11 @@ class PIController(MotionController):
             api.close_connection(ctrl_id)
             self._handle = None
 
-    def open(self):
-        ctrl_id = self.driver.api.connect_usb(self.idn)
+    def _open(self):
+        ctrl_id = self.driver.api.connect_usb(self.desc_str)
         self._handle = Command(ctrl_id)
 
-    def close(self):
+    def _close(self):
         self.driver.api.close_connection(self.handle.ctrl_id)
         self._handle = None
 
@@ -182,6 +202,10 @@ class PIController(MotionController):
         return pids
 
     def _get_versions(self):
+        """
+        Note:
+            This is F*CKING slow on Windows 7.
+        """
         response = PIController._retrieve_large_response(self.handle.get_version)
 
         # split version strings
@@ -194,20 +218,25 @@ class PIController(MotionController):
 
     ##
 
-    def enumerate_axes(self):
+    def enumerate_axes(self) -> Union[PILinear, PIRotary]:
+        ax_klass, ax_id = (
+            set(PIAxis.__subclasses__()),
+            self.handle.get_axes_id().strip().split("\n"),
+        )
+
         axes = []
-        for axis_id in self.handle.get_axes_id().strip().split("\n"):
-            logger.info(f"axis id: {axis_id}")
-
-            # query and re-asscoiate stage parameter from database
-            stype = self.handle.get_stage_type(axis_id)
-            print(stype)
-
-            axes = PILinear(self, axis_id)
-            for pname in ("stage_name", "is_rotary_stage"):
-                value = axes.get_property(pname)
-                print(f"{pname}: {value}")
-            print()
+        for axis_id in ax_id:
+            for klass in ax_klass:
+                axis = klass(self, axis_id)
+                try:
+                    axis.test_open()
+                    axes.append(axis)
+                    break
+                except UnsupportedDeviceError:
+                    pass
+            else:
+                logger.error(f"unknown axes {axis_id}")
+        return tuple(axes)
 
     ##
 
@@ -220,34 +249,16 @@ class PIController(MotionController):
         return self._handle
 
     @property
-    def idn(self):
-        return self._idn
+    def desc_str(self):
+        return self._desc_str
 
     @property
     @lru_cache(maxsize=1)
     def info(self):
-        try:
-            # extract info from enumerated description
-            vendor, model, *args = self.idn.split(" ")
-            sn = args[-1]
-        except AttributeError:
-            # daisy chained device requires qIDN
-            response = self.handle.get_identification_string()
-            response = tuple(token.strip() for token in response.split(","))
-            vendor, model, sn, *args = response
-
-        # extract version
-        versions = self._get_versions()
-        # .. find GCS2 DLL
-        version = None
-        for key, value in versions.items():
-            if "PI_GCS2" in key:
-                version = value
-                break
-        else:
-            logger.warning("unable to determine GCS2 version")
-            version = "UNKNOWN"
-
+        response = self.handle.get_identification_string()
+        vendor, model, sn, version = tuple(
+            token.strip() for token in response.split(",")
+        )
         return DeviceInfo(vendor=vendor, model=model, version=version, serial_number=sn)
 
     @property
@@ -282,12 +293,10 @@ class PIController(MotionController):
 
 
 class PIDaisyChain(Device):
-    def __init__(self, driver, idn):
+    def __init__(self, driver, desc_str):
         super().__init__(driver)
-        self._idn = idn
-
+        self._desc_str = desc_str
         self._daisy_id = -1
-        self._n_members, self._active_members = 0, []
 
     ##
 
@@ -295,7 +304,7 @@ class PIDaisyChain(Device):
         api = self.driver.api
         daisy_id = -1
         try:
-            daisy_id, n_dev, _ = api.open_usb_daisy_chain(self.idn)
+            daisy_id, n_dev, _ = api.open_usb_daisy_chain(self.desc_str)
             if n_dev == 1:
                 # shunt to error
                 raise UnsupportedDeviceError
@@ -306,44 +315,21 @@ class PIDaisyChain(Device):
         finally:
             api.close_daisy_chain(daisy_id)
 
-    def open(self):
-        if self.is_opened:
-            return
-
-        # open the chain
+    def _open(self):
+        print(">>> OPEN DAISY")
         self._daisy_id, self._n_members, _ = self.driver.api.open_usb_daisy_chain(
-            self.idn
-        )
-        # reset active list
-        self._active_members = dict()
-
-    def register(self, member: "PIDaisyController"):
-        logger.debug(
-            f"<REGIS> daisy id: {self.daisy_id}, daisy_index: {member.daisy_index}"
-        )
-        self._active_members[member.daisy_index] = member
-
-    def unregister(self, member: "PIDaisyController"):
-        self._active_members.pop(member.daisy_index)
-        logger.debug(
-            f"<UNREG> daisy id: {self.daisy_id}, daisy_index: {member.daisy_index}"
+            self.desc_str
         )
 
-    def close(self):
-        if self._active_members:
-            logger.warning("there are still active members, unable to close")
-            return
-
+    def _close(self):
+        print("<<< CLOSE DAISY")
         self.driver.api.close_daisy_chain(self.daisy_id)
         self._daisy_id = -1
 
     ##
 
     def enumerate_properties(self):
-        return ("active_members", "number_of_members")
-
-    def _get_active_members(self):
-        return self._active_members
+        return ("number_of_members",)
 
     def _get_number_of_members(self):
         return self._n_members
@@ -359,14 +345,14 @@ class PIDaisyChain(Device):
         return self._daisy_id
 
     @property
-    def idn(self):
-        return self._idn
+    def desc_str(self):
+        return self._desc_str
 
     @property
     @lru_cache(maxsize=1)
     def info(self):
         # extract info from *IDN?, since SSN? may not exist
-        vendor, *args = self.idn.split(" ")
+        vendor, *args = self.desc_str.split(" ")
         sn = args[-1]
 
         return DeviceInfo(vendor=vendor, model="DAISY", version=None, serial_number=sn)
@@ -378,7 +364,7 @@ class PIDaisyChain(Device):
 
 class PIDaisyController(PIController, MotionController):
     def __init__(self, parent: PIDaisyChain, daisy_index):
-        super().__init__(driver=parent.driver, idn=None, parent=parent)
+        super().__init__(driver=parent.driver, desc_str=None, parent=parent)
         self._daisy_index = daisy_index
 
     ##
@@ -394,24 +380,11 @@ class PIDaisyController(PIController, MotionController):
         finally:
             self.close()
 
-    def open(self):
-        # open daisy chain
-        self.parent.open()
-        # open daisy member
+    def _open(self):
         ctrl_id = self.driver.api.connect_daisy_chain_device(
             self.parent.daisy_id, self.daisy_index
         )
         self._handle = Command(ctrl_id)
-        # register
-        self.parent.register(self)
-
-    def close(self):
-        # close daisy member
-        super().close()
-        # unregister
-        self.parent.unregister(self)
-        # close daisy chain
-        self.parent.close()
 
     ##
 
@@ -427,19 +400,20 @@ class GCS2(Driver):
     ##
 
     def initialize(self, error_check=True):
-        pass
+        self.api.set_daisy_chain_scan_max_device_id(4)
 
     def shutdown(self):
         pass
 
     def enumerate_devices(self, keyword: str = "") -> PIController:
         response = self.api.enumerate_usb(keyword)
-        dev_idn = list(response.strip().split("\n"))
-        logger.debug(f"found {len(dev_idn)} controller candidate(s)")
+        desc_strs = list(response.strip().split("\n"))
+        logger.debug(f"found {len(desc_strs)} controller candidate(s)")
 
-        valid_devices = []
-        for idn in dev_idn:
-            chain = PIDaisyChain(self, idn)
+        valid_controllers = []
+        for desc_str in desc_strs:
+            logger.debug(f"desc_str: {desc_str}")
+            chain = PIDaisyChain(self, desc_str)
             try:
                 chain.test_open()
 
@@ -450,22 +424,30 @@ class GCS2(Driver):
                 logger.info(f"found {n_members} member(s)")
                 for index in range(1, n_members + 1):
                     try:
+                        logger.debug(f".. index: {index}")
                         device = PIDaisyController(chain, index)
                         device.test_open()
-                        valid_devices.append(device)
+                        valid_controllers.append(device)
                     except UnsupportedDeviceError:
                         pass
                 chain.close()
             except UnsupportedDeviceError:
                 # rebuild an independent controller
-                device = PIController(self, idn)
+                device = PIController(self, desc_str)
                 try:
                     device.test_open()
-                    valid_devices.append(device)
+                    valid_controllers.append(device)
                 except UnsupportedDeviceError:
                     pass
 
-        return tuple(valid_devices)
+        valid_axes = []
+        for controller in valid_controllers:
+            controller.open()
+            try:
+                valid_axes.extend(controller.enumerate_axes())
+            finally:
+                controller.close()
+        return tuple(valid_axes)
 
     ##
 
