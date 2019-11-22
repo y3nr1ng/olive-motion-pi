@@ -2,11 +2,12 @@ from functools import lru_cache
 import logging
 from multiprocessing.sharedctypes import RawArray
 import re
+import sys
 
 import numpy as np
 
 from olive.core import Device, DeviceInfo, Driver
-from olive.devices import LinearAxis, MotionController
+from olive.devices import LinearAxis, MotionController, RotaryAxis
 from olive.devices.errors import UnsupportedDeviceError
 from olive.devices.motion import Axis
 
@@ -18,31 +19,38 @@ logger = logging.getLogger(__name__)
 
 
 class PIAxis(Axis):
-    def __init__(self, axis_id, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._axis_id = axis_id
+    def __init__(self, parent, axis_id, *args, **kwargs):
+        super().__init__(parent.driver, *args, parent=parent, **kwargs)
+        self._handle, self._axis_id = parent.handle, axis_id
 
     ##
 
     def enumerate_properties(self):
-        return ("is_rotary_stage", "stage_type")
+        return list(self.parent.get_property("available_parameters").keys())
 
-    def _get_is_rotary_stage(self):
-        value, _ = self.handle.get_axes_parameter(self.axis_id, [19])
-        value = value[0]
-        print(f"_get_is_rotary_stage: {value}")
-        return value > 0
+    def get_property(self, name):
+        pid, dtype, max_item = self.parent.get_property("available_parameters")[name]
+        value_int, value_str = self.handle.get_axes_parameter(self.axis_id, [pid])
+        if dtype == "char":
+            return value_str
+        else:
+            if max_item > 1:
+                return value_int[:max_item]
+            else:
+                return value_int[0]
 
-    def _get_stage_type(self):
-        _, value = self.handle.get_axes_parameter(self.axis_id, [60])
-        print(f"_get_stage_type: {value}")
-        return value
+    def set_property(self, name, value):
+        raise NotImplementedError
 
     ##
 
     @property
     def axis_id(self):
         return self._axis_id
+
+    @property
+    def handle(self):
+        return self._handle
 
     @property
     @lru_cache(maxsize=1)
@@ -61,8 +69,9 @@ class PIAxis(Axis):
 
 class PILinear(PIAxis, LinearAxis):
     def __init__(self, parent, axis_id):
-        super().__init__(axis_id=axis_id, driver=parent.driver, parent=parent)
-        self._handle, self._axis_id = parent.handle, axis_id
+        super().__init__(parent=parent, axis_id=axis_id)
+
+    ##
 
     def test_open(self):
         pass
@@ -75,9 +84,10 @@ class PILinear(PIAxis, LinearAxis):
 
     ##
 
-    @property
-    def handle(self):
-        return self._handle
+
+class PIRotary(PIAxis, RotaryAxis):
+    def __init__(self, parent, axis_id):
+        super().__init__(axis_id=axis_id, parent=parent)
 
 
 class PIController(MotionController):
@@ -112,12 +122,14 @@ class PIController(MotionController):
     ##
 
     def enumerate_properties(self):
-        return ("help", "parameters", "versions")
+        return ("available_commands", "available_parameters", "versions")
 
     ##
 
-    def _get_help(self):
-        response = PIController._retrieve_large_response(self.handle.get_help)
+    def _get_available_commands(self):
+        response = PIController._retrieve_large_response(
+            self.handle.get_available_commands
+        )
 
         result = dict()
         for line in response.split("\n"):
@@ -128,8 +140,11 @@ class PIController(MotionController):
 
         return result
 
-    def _get_parameters(self):
-        response = PIController._retrieve_large_response(self.handle.get_parameters)
+    @lru_cache(maxsize=1)
+    def _get_available_parameters(self):
+        response = PIController._retrieve_large_response(
+            self.handle.get_available_parameters
+        )
 
         # response format
         #   <PamID>=
@@ -139,7 +154,7 @@ class PIController(MotionController):
         #       <FuncDesc>\t
         #       <Desc>
         #       [{\t<Value>=<Desc>}]
-        pids = []
+        pids = dict()
         for line in response.split("\n"):
             if not line.startswith("0x"):
                 continue
@@ -147,8 +162,24 @@ class PIController(MotionController):
             pid, desc = int(pid, 16), desc.strip()
 
             cmd_level, max_item, dtype, _, desc, *options = desc.split("\t")
-            pids.append((pid, max_item, dtype, desc))
-        return tuple(pids)
+
+            # normalize the name
+            #   'Device S/N'
+            #       -> 'device_sn'
+            #   'Closed-Loop Deceleration For HI Control (Phys. Unit/s2)'
+            #       -> 'closed_loop_deceleration_for_hi_control'
+            #   'Is Rotary Stage?'
+            #       -> 'is_rotary_stage'
+            desc = desc.lower()
+            desc = desc.split("(")[0].strip()
+            desc = re.sub(r"[\-\s]+", "_", desc)
+            desc = re.sub(r"[^0-9a-zA-Z_]+", "", desc)
+
+            # normalize paramter info
+            dtype, max_item = dtype.lower(), int(max_item)
+
+            pids[desc] = (pid, dtype, max_item)
+        return pids
 
     def _get_versions(self):
         response = PIController._retrieve_large_response(self.handle.get_version)
@@ -173,10 +204,9 @@ class PIController(MotionController):
             print(stype)
 
             axes = PILinear(self, axis_id)
-            stype = axes.get_property("stage_type")
-            print(f"stage_type: {stype}")
-            state = axes.get_property("is_rotary_stage")
-            print(f"is rotary: {state}")
+            for pname in ("stage_name", "is_rotary_stage"):
+                value = axes.get_property(pname)
+                print(f"{pname}: {value}")
             print()
 
     ##
@@ -405,6 +435,7 @@ class GCS2(Driver):
     def enumerate_devices(self, keyword: str = "") -> PIController:
         response = self.api.enumerate_usb(keyword)
         dev_idn = list(response.strip().split("\n"))
+        logger.debug(f"found {len(dev_idn)} controller candidate(s)")
 
         valid_devices = []
         for idn in dev_idn:

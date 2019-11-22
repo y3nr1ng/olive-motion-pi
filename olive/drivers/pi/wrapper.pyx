@@ -244,9 +244,6 @@ cdef class Command:
         )
         self.check_error(ret)
 
-        print(v_parameter[0])
-        print(c_value[0])
-
         return value, c_strings.decode('ascii', errors='replace')
 
     cpdef set_axes_parameter(self):
@@ -267,7 +264,7 @@ cdef class Command:
         pass
 
     ## utils ##
-    cpdef get_help(self, int nbytes=512):
+    cpdef get_available_commands(self, int nbytes=512):
         """qHLP"""
         cdef char[::1] buffer = view.array(
             shape=(nbytes, ), itemsize=sizeof(char), format='c'
@@ -291,7 +288,7 @@ cdef class Command:
 
         return c_buffer.decode('ascii', errors='replace')
 
-    cpdef get_parameters(self, int nbytes=512):
+    cpdef get_available_parameters(self, int nbytes=512):
         """qHPA"""
         cdef char[::1] buffer = view.array(
             shape=(nbytes, ), itemsize=sizeof(char), format='c'
