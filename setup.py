@@ -92,9 +92,7 @@ def generate_extension(ext_def):
         except KeyError:
             # ignore unused argument
             pass
-    from pprint import pprint
 
-    pprint(ext_def)
     return Extension(**ext_def)
 
 
