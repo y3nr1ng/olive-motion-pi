@@ -21,7 +21,7 @@ KEYWORDS = []
 AUTHOR = "Liu, Yen-Ting"
 EMAIL = "ytliu@gate.sinica.edu.tw"
 
-REQUIRES = ["numpy"]
+REQUIRES = ["trio~=0.13.0"]
 
 PACKAGES = ["olive.drivers.pi"]
 
@@ -31,11 +31,8 @@ EXT_DEFS = [
         "language": "c++",
         "include_dirs": [
             # "Module .pxd file not found next to .pyx file", https://github.com/cython/cython/issues/2452
-            ".",
-            # numpy
-            numpy.get_include(),
+            "."
         ],
-        # "extra_objects": ["lib/PI_GCS2_DLL_x64.lib"],
         "libraries": ["PI_GCS2_DLL_x64"],
         "library_dirs": ["lib"],
     }

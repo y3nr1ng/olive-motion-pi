@@ -1,11 +1,8 @@
 from functools import lru_cache
 import logging
-from multiprocessing.sharedctypes import RawArray
 import re
 import trio
 from typing import Union
-
-import numpy as np
 
 from olive.core import Device, DeviceInfo, Driver
 from olive.devices import LinearAxis, MotionController, RotaryAxis
