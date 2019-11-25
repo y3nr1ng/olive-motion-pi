@@ -2,6 +2,7 @@ import logging
 from pprint import pprint
 
 import coloredlogs
+import trio
 
 from olive.drivers.pi import GCS2
 
@@ -11,19 +12,24 @@ coloredlogs.install(
 
 logger = logging.getLogger(__name__)
 
-# init driver
-driver = GCS2()
-driver.initialize()
 
-try:
-    axis = driver.enumerate_devices()
-    for axes in axis:
-        print(axes.info)
-        print("> home")
-        axes.home()
-        print("> set_relative_position")
-        while True:
-            axes.set_relative_position(1)
-            axes.wait()
-finally:
-    driver.shutdown()
+async def main():
+    # init driver
+    driver = GCS2()
+    driver.initialize()
+
+    try:
+        axis = await driver.enumerate_devices()
+        for axes in axis:
+            print(axes.info)
+            print("> home")
+            await axes.home()
+            print("> set_relative_position")
+            for _ in range(10):
+                await axes.set_relative_position(1)
+    finally:
+        driver.shutdown()
+
+
+if __name__ == "__main__":
+    trio.run(main)

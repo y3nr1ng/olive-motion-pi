@@ -2,6 +2,7 @@ from functools import lru_cache
 import logging
 from multiprocessing.sharedctypes import RawArray
 import re
+import trio
 from typing import Union
 
 import numpy as np
@@ -12,12 +13,12 @@ from olive.devices.errors import UnsupportedDeviceError
 from olive.devices.motion import Axis
 
 from .wrapper import (
-    Command,
+    AxisCommand,
+    ControllerCommand,
     Communication,
     ReferenceMode,
     ReferenceStrategy,
     ServoState,
-    VelocityControl,
 )
 
 __all__ = ["GCS2"]
@@ -28,29 +29,28 @@ logger = logging.getLogger(__name__)
 class PIAxis(Axis):
     def __init__(self, parent, axis_id, *args, **kwargs):
         super().__init__(parent.driver, *args, parent=parent, **kwargs)
-        self._handle, self._axis_id = parent.handle, axis_id
+        self._handle = AxisCommand(parent.handle.ctrl_id, axis_id)
 
-    def _open(self):
+    async def _open(self):
         # must use closed-loop
-        self.handle.set_servo_state(self.axis_id, ServoState.ClosedLoop)
+        self.handle.set_servo_state(ServoState.ClosedLoop)
 
         # referenced mode
-        self.handle.set_reference_mode(self.axis_id, ReferenceMode.On)
-        if self.handle.is_referenced(self.axis_id):
-            logger.debug(f".. is referenced")
-        else:
+        self.handle.set_reference_mode(ReferenceMode.Absolute)
+        if not self.handle.is_referenced():
             # TODO lock to center for now
-            #self.handle.start_reference(self.axis_id, ReferenceStrategy.ReferencePoint)
-            self.handle.start_reference(self.axis_id, ReferenceStrategy.NegativeLimit)
+            self.handle.start_reference(ReferenceStrategy.ReferencePoint)
+        await self.wait()
 
     ##
 
-    def enumerate_properties(self):
-        return tuple(self.parent.get_property("available_parameters").keys())
+    async def enumerate_properties(self):
+        return tuple((await self.parent.get_property("available_parameters")).keys())
 
-    def get_property(self, name):
-        pid, dtype, max_item = self.parent.get_property("available_parameters")[name]
-        value_num, value_str = self.handle.get_axes_parameter(self.axis_id, [pid])
+    async def get_property(self, name):
+        prop_detail = (await self.parent.get_property("available_parameters"))[name]
+        pid, dtype, max_item = prop_detail
+        value_num, value_str = self.handle.get_parameter([pid])
         if dtype == "char":
             return value_str
         else:
@@ -64,72 +64,76 @@ class PIAxis(Axis):
             # simplify
             return value_num[0] if max_item == 1 else value_num
 
-    def set_property(self, name, value):
+    async def set_property(self, name, value):
         raise NotImplementedError
 
     ##
 
-    def home(self):
-        self.handle.go_to_home(self.axis_id)
+    async def home(self):
+        await trio.to_thread.run_sync(self.handle.go_to_home)
+        await self.wait()
 
-    def get_position(self):
-        return self.handle.get_current_position(self.axis_id)
+    async def get_position(self):
+        return self.handle.get_current_position()
 
-    def set_absolute_position(self, pos):
-        self.handle.set_target_position(self.axis_id, pos)
+    async def set_absolute_position(self, pos):
+        self.handle.set_target_position(pos)
 
-    def set_relative_position(self, pos):
-        self.handle.set_relative_target_position(self.axis_id, pos)
+    async def set_relative_position(self, pos):
+        self.handle.set_relative_target_position(pos)
+        await self.wait()
 
     ##
 
-    def get_velocity(self):
+    async def get_velocity(self):
         return self.handle.get_velocity()
 
-    def set_velocity(self, vel):
-        self.handle.set_velocity(self.axis_id, vel)
+    async def set_velocity(self, vel):
+        self.handle.set_velocity(vel)
 
     ##
 
-    def get_acceleration(self):
+    async def get_acceleration(self):
         return self.handle.get_acceleration()
 
-    def set_acceleration(self, acc):
-        self.handle.set_acceleration(self.axis_id, acc)
+    async def set_acceleration(self, acc):
+        self.handle.set_acceleration(acc)
 
     ##
 
-    def set_origin(self):
+    async def set_origin(self):
         """Define current position as the origin."""
 
-    def get_limits(self):
+    async def get_limits(self):
+        """
+        TMN low end of the travel range
+        TMX high end of the travel range
+
+        NLM set lower limits (soft limit)
+        PLM set higher limits (soft limit)
+        """
         pass
 
-    def set_limits(self):
+    async def set_limits(self):
         pass
 
     ##
 
-    def stop(self, emergency=False):
+    async def stop(self, emergency=False):
         if emergency:
             self.handle.stop_all()
         else:
-            self.handle.halt(self.axis_id)
+            self.handle.halt()
 
-    def wait(self):
-        # TODO use async
-        while self.handle.is_moving(self.axis_id):
-            print(".. busy")
+    async def wait(self):
+        while self.busy:
+            await trio.sleep(1)
 
     ##
 
     @property
-    def axis_id(self):
-        return self._axis_id
-
-    @property
     def busy(self):
-        return self.parent.busy or self.handle.is_moving(self.axis_id)
+        return self.parent.busy or self.handle.is_moving()
 
     @property
     def handle(self):
@@ -138,7 +142,7 @@ class PIAxis(Axis):
     @property
     @lru_cache(maxsize=1)
     def info(self):
-        model = self.handle.get_stage_type(self.axis_id).strip()
+        model = self.handle.get_stage_type().strip()
         model = model.split("=")[1]
 
         # extract info from parent
@@ -158,17 +162,17 @@ class PILinear(PIAxis, LinearAxis):
 
     ##
 
-    def test_open(self):
-        self.open()
+    async def test_open(self):
         try:
-            if self.get_property("is_rotary_stage") > 0:
+            await self.open()
+            if (await self.get_property("is_rotary_stage")) > 0:
                 raise UnsupportedDeviceError
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
             raise UnsupportedDeviceError
         finally:
-            self.close()
+            await self.close()
 
     ##
 
@@ -179,24 +183,17 @@ class PIRotary(PIAxis, RotaryAxis):
 
     ##
 
-    def test_open(self):
-        self.open()
+    async def test_open(self):
         try:
-            if self.get_property("is_rotary_stage") == 0:
+            await self.open()
+            if (await self.get_property("is_rotary_stage")) == 0:
                 raise UnsupportedDeviceError
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
             raise UnsupportedDeviceError
         finally:
-            self.close()
-
-    ##
-
-    def continuous_mode(self, enable):
-        self.handle.set_velocity_control_mode(
-            self.axis_id, VelocityControl.On if enable else VelocityControl.Off
-        )
+            await self.close()
 
 
 class PIController(MotionController):
@@ -206,31 +203,31 @@ class PIController(MotionController):
 
     ##
 
-    def test_open(self):
-        api = self.driver.api
-        ctrl_id = -1
+    async def test_open(self):
         try:
-            ctrl_id = api.connect_usb(self.desc_str)
-            self._handle = Command(ctrl_id)
+            await self.open()
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
             raise UnsupportedDeviceError
         finally:
-            api.close_connection(ctrl_id)
-            self._handle = None
+            await self.close()
 
-    def _open(self):
-        ctrl_id = self.driver.api.connect_usb(self.desc_str)
-        self._handle = Command(ctrl_id)
+    async def _open(self):
+        ctrl_id = await trio.to_thread.run_sync(
+            self.driver.api.connect_usb, self.desc_str
+        )
+        self._handle = ControllerCommand(ctrl_id)
 
-    def _close(self):
-        self.driver.api.close_connection(self.handle.ctrl_id)
+    async def _close(self):
+        await trio.to_thread.run_sync(
+            self.driver.api.close_connection, self.handle.ctrl_id
+        )
         self._handle = None
 
     ##
 
-    def enumerate_properties(self):
+    async def enumerate_properties(self):
         return ("available_commands", "available_parameters", "versions")
 
     ##
@@ -307,7 +304,7 @@ class PIController(MotionController):
 
     ##
 
-    def enumerate_axes(self) -> Union[PILinear, PIRotary]:
+    async def enumerate_axes(self) -> Union[PILinear, PIRotary]:
         ax_klass, ax_id = (
             set(PIAxis.__subclasses__()),
             self.handle.get_axes_id().strip().split("\n"),
@@ -318,7 +315,7 @@ class PIController(MotionController):
             for klass in ax_klass:
                 axis = klass(self, axis_id)
                 try:
-                    axis.test_open()
+                    await axis.test_open()
                     axes.append(axis)
                     break
                 except UnsupportedDeviceError:
@@ -331,7 +328,7 @@ class PIController(MotionController):
 
     @property
     def busy(self):
-        return self.handle.is_running_macro or not self.handle.is_controller_ready()
+        return self.handle.is_running_macro() or not self.handle.is_controller_ready()
 
     @property
     def handle(self):
@@ -389,7 +386,7 @@ class PIDaisyChain(Device):
 
     ##
 
-    def test_open(self):
+    async def test_open(self):
         api = self.driver.api
         daisy_id = -1
         try:
@@ -404,13 +401,13 @@ class PIDaisyChain(Device):
         finally:
             api.close_daisy_chain(daisy_id)
 
-    def _open(self):
-        self._daisy_id, self._n_members, _ = self.driver.api.open_usb_daisy_chain(
-            self.desc_str
+    async def _open(self):
+        self._daisy_id, self._n_members, _ = await trio.to_thread.run_sync(
+            self.driver.api.open_usb_daisy_chain, self.desc_str
         )
 
-    def _close(self):
-        self.driver.api.close_daisy_chain(self.daisy_id)
+    async def _close(self):
+        await trio.to_thread.run_sync(self.driver.api.close_daisy_chain, self.daisy_id)
         self._daisy_id = -1
 
     ##
@@ -456,22 +453,24 @@ class PIDaisyController(PIController, MotionController):
 
     ##
 
-    def test_open(self):
+    async def test_open(self):
         try:
             # use daisy ID from the parent
-            self.open()
+            await self.open()
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
             raise UnsupportedDeviceError
         finally:
-            self.close()
+            await self.close()
 
-    def _open(self):
-        ctrl_id = self.driver.api.connect_daisy_chain_device(
-            self.parent.daisy_id, self.daisy_index
+    async def _open(self):
+        ctrl_id = await trio.to_thread.run_sync(
+            self.driver.api.connect_daisy_chain_device,
+            self.parent.daisy_id,
+            self.daisy_index,
         )
-        self._handle = Command(ctrl_id)
+        self._handle = ControllerCommand(ctrl_id)
 
     ##
 
@@ -492,7 +491,7 @@ class GCS2(Driver):
     def shutdown(self):
         pass
 
-    def enumerate_devices(self, keyword: str = "") -> PIController:
+    async def enumerate_devices(self, keyword: str = "") -> PIController:
         response = self.api.enumerate_usb(keyword)
         desc_strs = list(response.strip().split("\n"))
         logger.debug(f"found {len(desc_strs)} controller candidate(s)")
@@ -501,38 +500,38 @@ class GCS2(Driver):
         for desc_str in desc_strs:
             chain = PIDaisyChain(self, desc_str)
             try:
-                chain.test_open()
+                await chain.test_open()
 
                 # a daisy-chain master
-                chain.open()
+                await chain.open()
                 # iterate over member index
-                n_members = chain.get_property("number_of_members")
+                n_members = await chain.get_property("number_of_members")
                 logger.info(f"found {n_members} member(s)")
                 for index in range(1, n_members + 1):
                     try:
                         logger.debug(f".. index: {index}")
                         device = PIDaisyController(chain, index)
-                        device.test_open()
+                        await device.test_open()
                         valid_controllers.append(device)
                     except UnsupportedDeviceError:
                         pass
-                chain.close()
+                await chain.close()
             except UnsupportedDeviceError:
                 # rebuild an independent controller
                 device = PIController(self, desc_str)
                 try:
-                    device.test_open()
+                    await device.test_open()
                     valid_controllers.append(device)
                 except UnsupportedDeviceError:
                     pass
 
         valid_axes = []
         for controller in valid_controllers:
-            controller.open()
+            await controller.open()
             try:
-                valid_axes.extend(controller.enumerate_axes())
+                valid_axes.extend(await controller.enumerate_axes())
             finally:
-                controller.close()
+                await controller.close()
         return tuple(valid_axes)
 
     ##

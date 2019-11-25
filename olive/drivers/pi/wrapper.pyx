@@ -12,8 +12,8 @@ from gcs2 cimport *
 ##
 
 class ReferenceMode(IntEnum):
-    On  = 1
-    Off = 0
+    Absolute = 1
+    Relative = 0
 
 class ReferenceStrategy(Enum):
     ReferencePoint  = auto()
@@ -23,10 +23,6 @@ class ReferenceStrategy(Enum):
 class ServoState(IntEnum):
     OpenLoop    = 0
     ClosedLoop  = 1
-
-class VelocityControl(IntEnum):
-    On  = 1
-    Off = 0
 
 ##
 
@@ -158,14 +154,13 @@ cdef class Communication:
         PI_CloseConnection(ctrl_id)
 
 
-@cython.final
-cdef class Command:
+cdef class ControllerCommand:
     """
     Wrapper class for GCS2 commands. These commands are controller dependents.
     """
     cdef readonly int ctrl_id
 
-    def __cinit__(self, int ctrl_id):
+    def __cinit__(self, int ctrl_id, *args):
         self.ctrl_id = ctrl_id
 
     cdef check_error(self, int ret):
@@ -229,230 +224,10 @@ cdef class Command:
 
         return c_buffer.decode('ascii', errors='replace')
 
-    cpdef get_stage_type(self, str axis_id="", int nbytes=512):
-        """qCST"""
-        cdef char[::1] buffer = view.array(
-            shape=(nbytes, ), itemsize=sizeof(char), format='c'
-        )
-        cdef char *c_buffer = &buffer[0]
-
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-        ret = PI_qCST(self.ctrl_id, c_axis_id, c_buffer, nbytes)
-        self.check_error(ret)
-
-        return c_buffer.decode('ascii', errors='replace')
-
-    cpdef get_axes_parameter(
-        self, str axis_id, parameter, pybool volatile=False, int nbytes=512
-    ):
-        """qSEP/qSPA"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        cdef vector[unsigned int] v_parameter = parameter
-
-        cdef double[::1] value = view.array(
-            shape=(nbytes, ), itemsize=sizeof(double), format='g'
-        )
-        cdef double *c_value = &value[0]
-
-        cdef char[::1] strings = view.array(
-            shape=(nbytes, ), itemsize=sizeof(char), format='c'
-        )
-        cdef char *c_strings = &strings[0]
-
-        if volatile:
-            ret = PI_qSPA(
-                self.ctrl_id,
-                c_axis_id,
-                v_parameter.data(),
-                c_value,
-                c_strings,
-                nbytes
-            )
-        else:
-            ret = PI_qSEP(
-                self.ctrl_id,
-                c_axis_id,
-                v_parameter.data(),
-                c_value,
-                c_strings,
-                nbytes
-            )
-        self.check_error(ret)
-
-        return value, c_strings.decode('ascii', errors='replace')
-
-    cpdef set_axes_parameter(self):
-        pass
-
-    cpdef set_servo_state(self, str axis_id, int state: ServoState):
-        """SVO"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        ret = PI_SVO(self.ctrl_id, c_axis_id, &state)
-        self.check_error(ret)
-
-    ## reference ##
-    cpdef get_reference_mode(self, str axis_id):
-        """qRON"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        cdef int mode
-        ret = PI_qRON(self.ctrl_id, c_axis_id, &mode)
-        self.check_error(ret)
-
-        return ReferenceMode(mode)
-
-    cpdef set_reference_mode(self, str axis_id, int mode: ReferenceMode):
-        """RON"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        ret = PI_RON(self.ctrl_id, c_axis_id, &mode)
-        self.check_error(ret)
-
-    cpdef is_referenced(self, str axis_id=""):
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        cdef int state
-        ret = PI_qFRF(self.ctrl_id, c_axis_id, &state)
-        self.check_error(ret)
-
-        return state > 0
-
-    cpdef start_reference(
-        self,
-        str axis_id="",
-        strategy: ReferenceStrategy = ReferenceStrategy.ReferencePoint
-    ):
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        if strategy == ReferenceStrategy.ReferencePoint:
-            ret = PI_FRF(self.ctrl_id, c_axis_id)
-        elif strategy == ReferenceStrategy.NegativeLimit:
-            ret = PI_FNL(self.ctrl_id, c_axis_id)
-        elif strategy == ReferenceStrategy.PositiveLimit:
-            ret = PI_FPL(self.ctrl_id, c_axis_id)
-        else:
-            ret = 0
-        self.check_error(ret)
-
     ## motions ##
-    cpdef go_to_home(self, str axes=""):
-        """GOH"""
-        b_axes = axes.encode('ascii')
-        cdef char *c_axes = b_axes
-
-        cdef int status
-        ret = PI_GOH(self.ctrl_id, c_axes)
-        self.check_error(ret)
-
-    cpdef halt(self, str axes=""):
-        """
-        HLT
-
-        Halt the motion of given axes smoothly.
-        """
-        b_axes = axes.encode('ascii')
-        cdef char *c_axes = b_axes
-
-        cdef int status
-        ret = PI_HLT(self.ctrl_id, c_axes)
-        self.check_error(ret)
-
     cpdef stop_all(self):
         """#24"""
         ret = PI_StopAll(self.ctrl_id)
-        self.check_error(ret)
-
-    cpdef get_current_position(self, str axis_id):
-        """qPOS"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        cdef double value
-        ret = PI_qPOS(self.ctrl_id, c_axis_id, &value)
-        self.check_error(ret)
-
-        return value
-
-    cpdef set_target_position(self, str axis_id, double value):
-        """MOV"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        ret = PI_MOV(self.ctrl_id, c_axis_id, &value)
-        self.check_error(ret)
-
-    cpdef set_relative_target_position(self, str axis_id, double value):
-        """MVR"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        ret = PI_MVR(self.ctrl_id, c_axis_id, &value)
-        self.check_error(ret)
-
-    cpdef get_velocity_control_mode(self, str axis_id):
-        """qVCO"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        cdef int mode
-        ret = PI_qVCO(self.ctrl_id, c_axis_id, &mode)
-        self.check_error(ret)
-
-        return VelocityControl(mode)
-
-    cpdef set_velocity_control_mode(self, str axis_id, int mode: VelocityControl):
-        """VCO"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        ret = PI_VCO(self.ctrl_id, c_axis_id, &mode)
-        self.check_error(ret)
-
-    cpdef get_velocity(self, str axis_id):
-        """qVEL"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        cdef double value
-        ret = PI_qVEL(self.ctrl_id, c_axis_id, &value)
-        self.check_error(ret)
-
-        return value
-
-    cpdef set_velocity(self, str axis_id, double vel):
-        """VEL"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        ret = PI_VEL(self.ctrl_id, c_axis_id, &vel)
-        self.check_error(ret)
-
-    cpdef get_acceleration(self, str axis_id):
-        """qACC"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        cdef double value
-        ret = PI_qACC(self.ctrl_id, c_axis_id, &value)
-        self.check_error(ret)
-
-        return value
-
-    cpdef set_acceleration(self, str axis_id, double acc):
-        """ACC"""
-        b_axis_id = axis_id.encode('ascii')
-        cdef char *c_axis_id = b_axis_id
-
-        ret = PI_ACC(self.ctrl_id, c_axis_id, &acc)
         self.check_error(ret)
 
     ## utils ##
@@ -515,3 +290,208 @@ cdef class Command:
         self.check_error(ret)
 
         return c_buffer.decode('ascii', errors='replace')
+
+
+@cython.final
+cdef class AxisCommand(ControllerCommand):
+    """
+    Wrapper class for GCS2 commands. These commands are axis dependents.
+    """
+    cdef readonly bytes axis_id
+
+    def __cinit__(self, int ctrl_id, str axis_id):
+        self.ctrl_id, self.axis_id = ctrl_id, axis_id.encode('ascii')
+
+    ##
+
+    cpdef get_reference_mode(self):
+        """qRON"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef int mode
+        ret = PI_qRON(self.ctrl_id, c_axis_id, &mode)
+        self.check_error(ret)
+
+        return ReferenceMode(mode)
+
+    cpdef set_reference_mode(self, int mode: ReferenceMode):
+        """RON"""
+        cdef char *c_axis_id = self.axis_id
+
+        ret = PI_RON(self.ctrl_id, c_axis_id, &mode)
+        self.check_error(ret)
+
+    cpdef is_referenced(self):
+        cdef char *c_axis_id = self.axis_id
+
+        cdef int state
+        ret = PI_qFRF(self.ctrl_id, c_axis_id, &state)
+        self.check_error(ret)
+
+        return state > 0
+
+    cpdef start_reference(
+        self, strategy: ReferenceStrategy = ReferenceStrategy.ReferencePoint
+    ):
+        cdef char *c_axis_id = self.axis_id
+
+        if strategy == ReferenceStrategy.ReferencePoint:
+            ret = PI_FRF(self.ctrl_id, c_axis_id)
+        elif strategy == ReferenceStrategy.NegativeLimit:
+            ret = PI_FNL(self.ctrl_id, c_axis_id)
+        elif strategy == ReferenceStrategy.PositiveLimit:
+            ret = PI_FPL(self.ctrl_id, c_axis_id)
+        else:
+            ret = 0
+        self.check_error(ret)
+
+    ##
+
+    cpdef go_to_home(self):
+        """GOH"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef int status
+        ret = PI_GOH(self.ctrl_id, c_axis_id)
+        self.check_error(ret)
+
+    cpdef halt(self, str axis =""):
+        """
+        HLT
+
+        Halt the motion of given axes smoothly.
+        """
+        cdef char *c_axis_id = self.axis_id
+
+        cdef int status
+        ret = PI_HLT(self.ctrl_id, c_axis_id)
+        self.check_error(ret)
+
+    ##
+
+    cpdef get_current_position(self):
+        """qPOS"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef double value
+        ret = PI_qPOS(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+        return value
+
+    cpdef set_target_position(self, double value):
+        """MOV"""
+        cdef char *c_axis_id = self.axis_id
+
+        ret = PI_MOV(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+    cpdef set_relative_target_position(self, double value):
+        """MVR"""
+        cdef char *c_axis_id = self.axis_id
+
+        ret = PI_MVR(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+    ##
+
+    cpdef get_velocity(self):
+        """qVEL"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef double value
+        ret = PI_qVEL(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+        return value
+
+    cpdef set_velocity(self, double vel):
+        """VEL"""
+        cdef char *c_axis_id = self.axis_id
+
+        ret = PI_VEL(self.ctrl_id, c_axis_id, &vel)
+        self.check_error(ret)
+
+    ##
+
+    cpdef get_acceleration(self):
+        """qACC"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef double value
+        ret = PI_qACC(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+        return value
+
+    cpdef set_acceleration(self, double acc):
+        """ACC"""
+        cdef char *c_axis_id = self.axis_id
+
+        ret = PI_ACC(self.ctrl_id, c_axis_id, &acc)
+        self.check_error(ret)
+
+    ##
+
+    cpdef get_stage_type(self, int nbytes=512):
+        """qCST"""
+        cdef char[::1] buffer = view.array(
+            shape=(nbytes, ), itemsize=sizeof(char), format='c'
+        )
+        cdef char *c_buffer = &buffer[0]
+
+        cdef char *c_axis_id = self.axis_id
+        ret = PI_qCST(self.ctrl_id, c_axis_id, c_buffer, nbytes)
+        self.check_error(ret)
+
+        return c_buffer.decode('ascii', errors='replace')
+
+    cpdef get_parameter(
+        self, parameter, pybool volatile=False, int nbytes=512
+    ):
+        """qSEP/qSPA"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef vector[unsigned int] v_parameter = parameter
+
+        cdef double[::1] value = view.array(
+            shape=(nbytes, ), itemsize=sizeof(double), format='g'
+        )
+        cdef double *c_value = &value[0]
+
+        cdef char[::1] strings = view.array(
+            shape=(nbytes, ), itemsize=sizeof(char), format='c'
+        )
+        cdef char *c_strings = &strings[0]
+
+        if volatile:
+            ret = PI_qSPA(
+                self.ctrl_id,
+                c_axis_id,
+                v_parameter.data(),
+                c_value,
+                c_strings,
+                nbytes
+            )
+        else:
+            ret = PI_qSEP(
+                self.ctrl_id,
+                c_axis_id,
+                v_parameter.data(),
+                c_value,
+                c_strings,
+                nbytes
+            )
+        self.check_error(ret)
+
+        return value, c_strings.decode('ascii', errors='replace')
+
+    cpdef set_parameter(self):
+        pass
+
+    cpdef set_servo_state(self, int state: ServoState):
+        """SVO"""
+        cdef char *c_axis_id = self.axis_id
+
+        ret = PI_SVO(self.ctrl_id, c_axis_id, &state)
+        self.check_error(ret)
