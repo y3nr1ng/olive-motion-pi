@@ -16,7 +16,7 @@ class ReferenceMode(IntEnum):
     Relative = 0
 
 class ReferenceStrategy(Enum):
-    ReferencePoint  = auto()
+    ReferenceSwitch = auto()
     NegativeLimit   = auto()
     PositiveLimit   = auto()
 
@@ -330,12 +330,12 @@ cdef class AxisCommand(ControllerCommand):
 
         return state > 0
 
-    cpdef start_reference(
-        self, strategy: ReferenceStrategy = ReferenceStrategy.ReferencePoint
+    cpdef start_reference_movement(
+        self, strategy: ReferenceStrategy = ReferenceStrategy.ReferenceSwitch
     ):
         cdef char *c_axis_id = self.axis_id
 
-        if strategy == ReferenceStrategy.ReferencePoint:
+        if strategy == ReferenceStrategy.ReferenceSwitch:
             ret = PI_FRF(self.ctrl_id, c_axis_id)
         elif strategy == ReferenceStrategy.NegativeLimit:
             ret = PI_FNL(self.ctrl_id, c_axis_id)
@@ -378,6 +378,13 @@ cdef class AxisCommand(ControllerCommand):
         self.check_error(ret)
 
         return value
+
+    cpdef set_current_position(self, double value):
+        """POS"""
+        cdef char *c_axis_id = self.axis_id
+
+        ret = PI_POS(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
 
     cpdef set_target_position(self, double value):
         """MOV"""
@@ -433,6 +440,28 @@ cdef class AxisCommand(ControllerCommand):
 
     ##
 
+    cpdef get_travel_range_min(self):
+        """qTMN"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef double value
+        ret = PI_qTMN(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+        return value
+
+    cpdef get_travel_range_max(self):
+        """qTMX"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef double value
+        ret = PI_qTMX(self.ctrl_id, c_axis_id, &value)
+        self.check_error(ret)
+
+        return value
+
+    ##
+
     cpdef get_stage_type(self, int nbytes=512):
         """qCST"""
         cdef char[::1] buffer = view.array(
@@ -447,47 +476,77 @@ cdef class AxisCommand(ControllerCommand):
         return c_buffer.decode('ascii', errors='replace')
 
     cpdef get_parameter(
-        self, parameter, pybool volatile=False, int nbytes=512
+        self, unsigned int parameter, pybool volatile=False, int nelem=1, int nbytes=64
     ):
         """qSEP/qSPA"""
         cdef char *c_axis_id = self.axis_id
 
-        cdef vector[unsigned int] v_parameter = parameter
-
-        cdef double[::1] value = view.array(
-            shape=(nbytes, ), itemsize=sizeof(double), format='g'
+        cdef double[::1] values = view.array(
+            shape=(nelem, ), itemsize=sizeof(double), format='g'
         )
-        cdef double *c_value = &value[0]
+        cdef double *c_values = &values[0]
 
-        cdef char[::1] strings = view.array(
+        cdef char[::1] string = view.array(
             shape=(nbytes, ), itemsize=sizeof(char), format='c'
         )
-        cdef char *c_strings = &strings[0]
+        cdef char *c_string = &string[0]
 
         if volatile:
             ret = PI_qSPA(
                 self.ctrl_id,
                 c_axis_id,
-                v_parameter.data(),
-                c_value,
-                c_strings,
+                &parameter,
+                c_values,
+                c_string,
                 nbytes
             )
         else:
             ret = PI_qSEP(
                 self.ctrl_id,
                 c_axis_id,
-                v_parameter.data(),
-                c_value,
-                c_strings,
+                &parameter,
+                c_values,
+                c_string,
                 nbytes
             )
         self.check_error(ret)
 
-        return value, c_strings.decode('ascii', errors='replace')
+        return values, c_string.decode('ascii', errors='replace')
 
-    cpdef set_parameter(self):
-        pass
+    cpdef set_parameter(
+        self,
+        unsigned int parameter,
+        values,
+        str string,
+        pybool volatile=False,
+        int nbytes=64
+    ):
+        """SEP/SPA"""
+        cdef char *c_axis_id = self.axis_id
+
+        cdef vector[double] v_values = values
+
+        b_string = string.encode('ascii')
+        cdef char *c_string = b_string
+
+        if volatile:
+            ret = PI_SPA(
+                self.ctrl_id,
+                c_axis_id,
+                &parameter,
+                v_values.data(),
+                c_string
+            )
+        else:
+            ret = PI_SEP(
+                self.ctrl_id,
+                "100".encode('ascii'),
+                c_axis_id,
+                &parameter,
+                v_values.data(),
+                c_string
+            )
+        self.check_error(ret)
 
     cpdef set_servo_state(self, int state: ServoState):
         """SVO"""

@@ -19,14 +19,16 @@ async def main():
     driver.initialize()
 
     try:
-        axis = await driver.enumerate_devices()
-        for axes in axis:
-            print(axes.info)
+        axes = await driver.enumerate_devices()
+        for axis in axes:
+            print(axis.info)
             print("> home")
-            await axes.home()
+            await axis.home()
+            limits = await axis.get_limits()
+            print(f"> limits {limits}")
             print("> set_relative_position")
             for _ in range(10):
-                await axes.set_relative_position(1)
+                await axis.set_relative_position(1)
     finally:
         driver.shutdown()
 

@@ -35,12 +35,7 @@ class PIAxis(Axis):
         # must use closed-loop
         self.handle.set_servo_state(ServoState.ClosedLoop)
 
-        # referenced mode
-        self.handle.set_reference_mode(ReferenceMode.Absolute)
-        if not self.handle.is_referenced():
-            # TODO lock to center for now
-            self.handle.start_reference(ReferenceStrategy.ReferencePoint)
-        await self.wait()
+        await self.calibrate()
 
     ##
 
@@ -50,7 +45,7 @@ class PIAxis(Axis):
     async def get_property(self, name):
         prop_detail = (await self.parent.get_property("available_parameters"))[name]
         pid, dtype, max_item = prop_detail
-        value_num, value_str = self.handle.get_parameter([pid])
+        value_num, value_str = self.handle.get_parameter(pid)
         if dtype == "char":
             return value_str
         else:
@@ -71,38 +66,38 @@ class PIAxis(Axis):
 
     async def home(self):
         await trio.to_thread.run_sync(self.handle.go_to_home)
-        await self.wait()
 
     async def get_position(self):
-        return self.handle.get_current_position()
+        return await trio.to_thread.run_sync(self.handle.get_current_position)
 
     async def set_absolute_position(self, pos):
-        self.handle.set_target_position(pos)
+        await trio.to_thread.run_sync(self.handle.set_target_position, pos)
 
     async def set_relative_position(self, pos):
-        self.handle.set_relative_target_position(pos)
+        await trio.to_thread.run_sync(self.handle.set_relative_target_position, pos)
         await self.wait()
 
     ##
 
     async def get_velocity(self):
-        return self.handle.get_velocity()
+        return await trio.to_thread.run_sync(self.handle.get_velocity)
 
     async def set_velocity(self, vel):
-        self.handle.set_velocity(vel)
+        await trio.to_thread.run_sync(self.handle.set_velocity, vel)
 
     ##
 
     async def get_acceleration(self):
-        return self.handle.get_acceleration()
+        return await trio.to_thread.run_sync(self.handle.get_acceleration)
 
     async def set_acceleration(self, acc):
-        self.handle.set_acceleration(acc)
+        await trio.to_thread.run_sync(self.handle.set_acceleration, acc)
 
     ##
 
     async def set_origin(self):
-        """Define current position as the origin."""
+        # reset counter, trivial
+        self.handle.set_current_position(0)
 
     async def get_limits(self):
         """
@@ -112,12 +107,30 @@ class PIAxis(Axis):
         NLM set lower limits (soft limit)
         PLM set higher limits (soft limit)
         """
-        pass
+        lo = await trio.to_thread.run_sync(self.handle.get_travel_range_min)
+        hi = await trio.to_thread.run_sync(self.handle.get_travel_range_max)
+        return lo, hi
 
     async def set_limits(self):
-        pass
+        raise NotImplementedError
 
     ##
+
+    async def calibrate(self):
+        if self.handle.is_referenced():
+            return
+        logger.debug("calibrating...")
+
+        # start referencing
+        self.handle.set_reference_mode(ReferenceMode.Absolute)
+        await trio.to_thread.run_sync(
+            self.handle.start_reference_movement, ReferenceStrategy.ReferenceSwitch
+        )
+        # ... wait till complete
+        await self.wait()
+        # reset
+        self.handle.set_reference_mode(ReferenceMode.Relative)
+        await self.set_origin()
 
     async def stop(self, emergency=False):
         if emergency:
