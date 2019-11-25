@@ -495,10 +495,10 @@ class GCS2(Driver):
 
     ##
 
-    def initialize(self, error_check=True):
+    async def initialize(self, error_check=True):
         self.api.set_daisy_chain_scan_max_device_id(4)
 
-    def shutdown(self):
+    async def shutdown(self):
         pass
 
     async def enumerate_devices(self, keyword: str = "") -> PIController:

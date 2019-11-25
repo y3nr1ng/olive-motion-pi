@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    # init driver
     driver = GCS2()
-    driver.initialize()
 
     try:
+        # init driver
+        await driver.initialize()
+
+        # iterate over valid devices
         axes = await driver.enumerate_devices()
         for axis in axes:
             print(axis.info)
@@ -30,7 +32,7 @@ async def main():
             for _ in range(10):
                 await axis.set_relative_position(1)
     finally:
-        driver.shutdown()
+        await driver.shutdown()
 
 
 if __name__ == "__main__":

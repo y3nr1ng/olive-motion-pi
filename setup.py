@@ -93,7 +93,6 @@ def generate_extension(ext_def):
     return Extension(**ext_def)
 
 
-print("prepare to create extensions")
 EXTENSIONS = [generate_extension(ext_def) for ext_def in EXT_DEFS]
 
 setup(
