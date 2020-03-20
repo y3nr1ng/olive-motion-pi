@@ -4,9 +4,10 @@ import re
 import trio
 from typing import Union
 
-from olive.core import Device, DeviceInfo, Driver
+from olive.devices.base import Device, DeviceInfo
+from olive.core import Driver
 from olive.devices import LinearAxis, MotionController, RotaryAxis
-from olive.devices.errors import UnsupportedDeviceError
+from olive.devices.errors import UnsupportedClassError
 from olive.devices.motion import Axis
 
 from .wrapper import (
@@ -176,11 +177,11 @@ class PILinear(PIAxis, LinearAxis):
         try:
             await self.open()
             if (await self.get_property("is_rotary_stage")) > 0:
-                raise UnsupportedDeviceError
+                raise UnsupportedClassError
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
-            raise UnsupportedDeviceError
+            raise UnsupportedClassError
         finally:
             await self.close()
 
@@ -197,11 +198,11 @@ class PIRotary(PIAxis, RotaryAxis):
         try:
             await self.open()
             if (await self.get_property("is_rotary_stage")) == 0:
-                raise UnsupportedDeviceError
+                raise UnsupportedClassError
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
-            raise UnsupportedDeviceError
+            raise UnsupportedClassError
         finally:
             await self.close()
 
@@ -219,7 +220,7 @@ class PIController(MotionController):
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
-            raise UnsupportedDeviceError
+            raise UnsupportedClassError
         finally:
             await self.close()
 
@@ -328,7 +329,7 @@ class PIController(MotionController):
                     await axis.test_open()
                     axes.append(axis)
                     break
-                except UnsupportedDeviceError:
+                except UnsupportedClassError:
                     pass
             else:
                 logger.error(f"unknown axes {axis_id}")
@@ -403,11 +404,11 @@ class PIDaisyChain(Device):
             daisy_id, n_dev, _ = api.open_usb_daisy_chain(self.desc_str)
             if n_dev == 1:
                 # shunt to error
-                raise UnsupportedDeviceError
+                raise UnsupportedClassError
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
-            raise UnsupportedDeviceError
+            raise UnsupportedClassError
         finally:
             api.close_daisy_chain(daisy_id)
 
@@ -470,7 +471,7 @@ class PIDaisyController(PIController, MotionController):
             logger.info(f".. {self.info}")
         except RuntimeError as err:
             logger.exception(err)
-            raise UnsupportedDeviceError
+            raise UnsupportedClassError
         finally:
             await self.close()
 
@@ -523,16 +524,16 @@ class GCS2(Driver):
                         device = PIDaisyController(chain, index)
                         await device.test_open()
                         valid_controllers.append(device)
-                    except UnsupportedDeviceError:
+                    except UnsupportedClassError:
                         pass
                 await chain.close()
-            except UnsupportedDeviceError:
+            except UnsupportedClassError:
                 # rebuild an independent controller
                 device = PIController(self, desc_str)
                 try:
                     await device.test_open()
                     valid_controllers.append(device)
-                except UnsupportedDeviceError:
+                except UnsupportedClassError:
                     pass
 
         valid_axes = []
