@@ -1,0 +1,7 @@
+# allow library folder
+!lib/
+
+# only allow readme in the folder
+lib/*
+!lib/README.md
+
