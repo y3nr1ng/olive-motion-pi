@@ -1,5 +1,5 @@
 # Supplementary libraries
-Due to copyright issue, I cannot legally distribute `dcam-api` directly.
+Due to copyright issue, I cannot legally distribute `PI_GCS2_DLL*` directly.
 
 Please install PI SDK from their CD, and copy
 
